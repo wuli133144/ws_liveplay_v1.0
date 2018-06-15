@@ -38,6 +38,7 @@ public:
 	virtual void HandlePdu(CImPdu* pPdu);
 private:
 	  void _HandleLiveLoginResp(CImPdu* pPdu);
+	  void _HandleLiveMsgDataResp(CImPdu* pPdu);
 		
 
 private:

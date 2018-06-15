@@ -241,7 +241,9 @@ void CDBServConn::HandlePdu(CImPdu* pPdu)
        case CID_LIVE_LOGIN_RESPONSE:
 	   	    _HandleLiveLoginResp(pPdu);
             break;
-
+       case CID_LIVE_MSG_DATA_ACK:
+	   	    _HandleLiveMsgDataResp(pPdu);
+			break;
 
         default:
             WARN("db server, wrong cmd id=%d ", pPdu->GetCommandId());
@@ -254,7 +256,7 @@ void CDBServConn::_HandleLiveLoginResp(CImPdu*pPdu){
         IM::Live::IMLiveLoginResp resp;
 		if(!resp.ParseFromArray(pPdu->GetBodyData(),pPdu->GetBodyLength()))
 		{
-		    INFO("db server failed");
+		    INFO("_HandleLiveLoginResp db server failed");
 			return;
 		}
 
@@ -291,6 +293,57 @@ void CDBServConn::_HandleLiveLoginResp(CImPdu*pPdu){
 				  
 		}
 		
+		
 }
+
+
+void CDBServConn::_HandleLiveMsgDataResp(CImPdu* pPdu){
+      IM::Live::IMLiveMsgDataAck msgack;
+	  if(!msgack.ParseFromArray(pPdu->GetBodyData(),pPdu->GetBodyLength()))
+	  {
+	        INFO("_HandleLiveMsgDataResp db server failed");
+			return;
+	  }
+
+	  int userid=msgack.userid();
+	  int liveid=msgack.liveid();
+	  int result=msgack.result();
+      //readlock start
+	  pthread_rwlock_rdlock(&rwlock);
+      auto iter=g_user_socketmap.find(userid);
+	  pthread_rwlock_unlock(&rwlock); 
+	  //readlock end
+		
+	  if(iter!=g_user_socketmap.end()){
+	  	  user_t * user=iter->second;
+		  jsonxx::Object js;
+	      js<<"cmd"<<0x0004;
+		  js<<"result"<<result;
+		  jsonxx::Object jscontent;
+		  jscontent<<"imId"<<userid;
+		  jscontent<<"liveId"<<liveid;
+		  js<<"data"<<jscontent.json();
+
+		  strign json_msgack=js.json();
+		  
+		  frame_buffer_t *fb = frame_buffer_new(1, 1, user->wscon->frame->payload_len, user->wscon->frame->payload_data);
+		  memcpy(user->wscon->frame->payload_data,json_msgack.c_str(),json_msgack.size());
+		  user->wscon->frame->payload_len=json_msgack.size();
+		  //send to others
+          for(auto iter=g_user_socketmap.begin();iter!=g_user_socketmap.end();iter++)
+          {
+                 if(iter->first!=user->id){
+				 	
+				 	send_a_frame(iter->second->wscon,fb);
+					
+				 }
+          }
+		  
+		  frame_buffer_free(fb);
+		  
+	  }
+	  
+}
+
 
 
