@@ -291,8 +291,6 @@ void CDBServConn::_HandleLiveLoginResp(CImPdu*pPdu){
 				  
 		}
 		
-	
-
 }
 
 

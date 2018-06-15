@@ -21,6 +21,7 @@
 
 using namespace IM::BaseDefine;
 using namespace IM::Live;
+using namespace jsonxx;
 
 
 
@@ -29,7 +30,8 @@ extern vector<user_t*> user_vec;
 extern map<int /*imid*/ ,user_t *>g_user_socketmap;
 //extern vector<user_t *>valid_user;
 
-pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t  mutex=PTHREAD_MUTEX_INITIALIZER;
+pthread_rwlock_t rwlock_local=PTHREAD_RWLOCK_INITIALIZER;
 
 
 user_t *user_create() {
@@ -128,6 +130,52 @@ void _HandleIMliveLogin(jsonxx::Object & obj,user_t *user){
 }
 
 
+//send message 
+void _HandleIMLiveSendMessage(jsonxx::Object &jsonobj,user_t *user){
+
+       //no check json format
+       //add json check
+       jsonxx::Object js=jsonobj.get<jsonxx::Object>("data");
+	   int imid       =js.get<jsonxx::Number>("imId");
+	   string username=js.get<jsonxx::String>("name");
+	   string portrait=js.get<String>("portrait");
+	   int liveId     =js.get<Number>("liveId");
+	   string msg     =js.get<String>("msgData");
+	   int msgtype    =js.get<Number>("msgType");
+	   
+       pthread_rwlock_lock(&rwlock_local);
+	   auto iter=g_user_socketmap.find(user->id);
+	   pthread_rwlock_unlock(&rwlock_local);
+	   
+	   if(iter==g_user_socketmap.end())
+	   {  
+	      WARN("user has no permition,please login in");
+	      return;
+	   }
+
+	   IM::Live::IMLiveMsgData msgData;
+	   CImPdu pdu;
+	   msgData.set_liveid(liveId);
+	   msgData.set_name(username);
+	   msgData.set_msgtype(int2string(msgtype));
+	   msgData.set_msgdata(msg);
+	   msgData.set_portraits(portrait);
+	   msgData.set_userid(imid);
+
+	   pdu.SetCommandId(CID_LIVE_MSG_DATA);
+	   pdu.SetServiceId(SID_LIVE);
+	   
+       CDBServConn *dbcon=get_db_serv_conn(); 
+	   if(dbcon&&dbcon->IsOpen())
+	   {      
+		    dbcon->SendPdu(&pdu);
+	   }else{
+	   	   WARN("can't find dbcon peer object");
+		   return;
+	   }
+
+}
+
 #endif
 
 void frame_recv_cb(void *arg) {
@@ -146,8 +194,7 @@ void frame_recv_cb(void *arg) {
 	    //parse json data
 	    jsonxx::Object obj;
 		std::istringstream input(user->wscon->frame->payload_data);
-		INFO("fb->data=%s",fb->data);
-        
+		
         if(!obj.parse(input)){			
 			 INFO("client sended json data format error! please check it");
 			 string pstr="data format error";
@@ -160,25 +207,29 @@ void frame_recv_cb(void *arg) {
 			 frame_buffer_free(fb);
 			 return;
 		}
-		INFO("jsonstring %s %s",obj.json().c_str(),obj.get<jsonxx::String>("cmd").c_str());
-		if(obj.get<jsonxx::String>("cmd")=="loginChatRoom"){
-			
-			    
-			      //todo something()
-			      INFO("start handle login");
-			      _HandleIMliveLogin(obj,user);//添加实际的全局用户信息
-			      
-			 
-			 
-		}else{
-		     //todo exception()
-		     
-		     INFO("JSON data format error!");
-		     send_a_frame(user->wscon,fb);
-			 frame_buffer_free(fb);
-			 return;
-		}
-
+		
+		INFO("jsonstring %s cmd=%d",obj.json().c_str(),obj.get<jsonxx::Number>("cmd"));
+		
+		//todo()
+			if(obj.get<jsonxx::Number>("cmd")==0x0001){
+				      //todo something()
+				      INFO("start handle login");
+				      _HandleIMliveLogin(obj,user);//
+				     		 
+			}else if(obj.get<jsonxx::Number>("cmd")==0x0004){//send message
+				      INFO("start handle send message ");
+					  _HandleIMLiveSendMessage(obj,user);
+			}
+		    else{
+			     //todo exception()
+			     INFO("JSON data format error!");
+			     send_a_frame(user->wscon,fb);
+				 frame_buffer_free(fb);
+				 return;
+			}
+      
+      //end
+      
 		if (fb) {
 			//send to other users
 			for (int32_t i = 0; i < user_vec.size(); ++i) {
